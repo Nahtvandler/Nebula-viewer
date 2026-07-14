@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/User/AppData/Local/Temp/claude/C--git-nebula-viewer/a754990b-6aec-456d-b96c-4ca7289e9288/scratchpad/**)",
+      "Read(//c/Users/User/Downloads/**)",
+      "WebFetch(domain:claude.ai)"
+    ]
+  }
+}
