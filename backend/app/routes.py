@@ -104,9 +104,38 @@ def schema(space: str | None = None) -> SchemaInfo:
     counts = _stats_counts(space)
     return SchemaInfo(
         space=space,
-        tags=[TagInfo(name=t, count=counts.get(("Tag", t))) for t in tags],
-        edge_types=[EdgeTypeInfo(name=e, count=counts.get(("Edge", e))) for e in edge_types],
+        tags=[
+            TagInfo(name=t, count=counts.get(("Tag", t)), fields=_describe_fields("TAG", t, space))
+            for t in tags
+        ],
+        edge_types=[
+            EdgeTypeInfo(name=e, count=counts.get(("Edge", e)), fields=_describe_fields("EDGE", e, space))
+            for e in edge_types
+        ],
     )
+
+
+def _describe_fields(kind: str, name: str, space: str) -> list[str]:
+    """Имена свойств тега/типа-ребра из DESCRIBE — для подсказок сразу по схеме
+    (без ожидания первого запроса). Колонка 'Field' в результате DESCRIBE."""
+    if not name.replace("_", "").isalnum():
+        return []
+    try:
+        result = client.execute(f"DESCRIBE {kind} `{name}`", space=space)
+    except NebulaError:
+        return []
+    try:
+        keys = [k.lower() for k in result.keys()]
+        idx = keys.index("field") if "field" in keys else 0
+    except Exception:
+        idx = 0
+    fields: list[str] = []
+    for i in range(result.row_size()):
+        try:
+            fields.append(str(unwrap(result.row_values(i)[idx])))
+        except Exception:
+            continue
+    return fields
 
 
 def _show_names(stmt: str, space: str) -> list[str]:

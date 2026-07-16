@@ -42,11 +42,13 @@ export interface QueryError {
 export interface TagInfo {
   name: string
   count?: number | null
+  fields?: string[]
 }
 
 export interface EdgeTypeInfo {
   name: string
   count?: number | null
+  fields?: string[]
 }
 
 export interface SchemaInfo {

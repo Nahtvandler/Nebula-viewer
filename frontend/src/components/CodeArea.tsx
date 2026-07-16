@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from 'react'
 import { Highlight } from '../lib/highlight'
 import { parseVarTags } from '../lib/ngql'
 
@@ -18,7 +25,9 @@ interface Props {
 }
 
 const mono = "'IBM Plex Mono', monospace"
-const MAX_SUGGESTIONS = 8
+// Показываем много совпадений — список прокручивается; активный пункт
+// автоматически подскроливается в видимую область (см. эффект ниже).
+const MAX_SUGGESTIONS = 50
 
 // Слово перед кареткой (для фильтра подсказок).
 function currentToken(value: string, caret: number): { word: string; start: number } {
@@ -53,9 +62,17 @@ export function CodeArea({
   const preRef = useRef<HTMLPreElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const [matches, setMatches] = useState<string[]>([])
+
+  // Держим активный пункт списка в поле зрения при навигации стрелками.
+  useEffect(() => {
+    if (!open) return
+    const el = listRef.current?.children[active] as HTMLElement | undefined
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [active, open])
 
   // Авто-рост высоты: измеряем скрытый «зеркальный» слой с тем же текстом
   // и шрифтом → окно расширяется под содержимое (до предела, потом скролл).
@@ -291,13 +308,14 @@ export function CodeArea({
 
       {open && matches.length > 0 && (
         <div
+          ref={listRef}
           style={{
             position: 'absolute',
             top: 'calc(100% + 4px)',
             left: lineNumbers ? 44 : 0,
             zIndex: 70,
             minWidth: 220,
-            maxHeight: 260,
+            maxHeight: 280,
             overflowY: 'auto',
             background: 'var(--panel)',
             border: '1px solid var(--border-2)',

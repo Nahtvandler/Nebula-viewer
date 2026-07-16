@@ -69,11 +69,13 @@ class SpacesInfo(BaseModel):
 class TagInfo(BaseModel):
     name: str
     count: int | None = None
+    fields: list[str] = Field(default_factory=list)
 
 
 class EdgeTypeInfo(BaseModel):
     name: str
     count: int | None = None
+    fields: list[str] = Field(default_factory=list)
 
 
 class SchemaInfo(BaseModel):

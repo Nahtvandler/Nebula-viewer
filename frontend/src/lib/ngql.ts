@@ -92,6 +92,18 @@ export function collectFieldsByTag(
   return out
 }
 
+/** Карта тег/тип-ребра → поля прямо из схемы (DESCRIBE) — доступна сразу,
+ *  не дожидаясь первого запроса. */
+export function schemaFieldsByTag(
+  tags: { name: string; fields?: string[] }[],
+  edgeTypes: { name: string; fields?: string[] }[],
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const t of tags) if (t.fields?.length) out[t.name] = t.fields
+  for (const e of edgeTypes) if (e.fields?.length) out[e.name] = e.fields
+  return out
+}
+
 /** Слить несколько карт полей (напр. со всех фреймов истории) в одну. */
 export function mergeFieldsByTag(maps: Record<string, string[]>[]): Record<string, string[]> {
   const m: Record<string, Set<string>> = {}

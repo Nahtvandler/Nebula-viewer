@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useHealth, useSchema } from '../hooks'
-import { buildSuggestions, collectFieldsByTag, mergeFieldsByTag } from '../lib/ngql'
+import { buildSuggestions, collectFieldsByTag, mergeFieldsByTag, schemaFieldsByTag } from '../lib/ngql'
 import { useStore } from '../store'
 import { CodeArea } from './CodeArea'
 import { SpaceSelector } from './SpaceSelector'
@@ -17,11 +17,16 @@ export function Header() {
   const { data: health } = useHealth()
   const { data: schema } = useSchema(space)
 
-  // Поля собираем из свойств узлов/рёбер всех результатов истории — так подсказки
-  // по именам полей доступны и в главном окне (в т.ч. контекстные c.Component.<field>).
+  // Поля берём СРАЗУ из схемы (DESCRIBE) + дополняем фактическими из результатов
+  // истории. Так подсказки по полям (в т.ч. контекстные c.Component.<field>)
+  // доступны без ожидания первого запроса.
   const fieldsByTag = useMemo(
-    () => mergeFieldsByTag(frames.map((f) => collectFieldsByTag(f.nodes, f.edges))),
-    [frames],
+    () =>
+      mergeFieldsByTag([
+        schemaFieldsByTag(schema?.tags ?? [], schema?.edge_types ?? []),
+        ...frames.map((f) => collectFieldsByTag(f.nodes, f.edges)),
+      ]),
+    [schema, frames],
   )
   const suggestions = useMemo(
     () =>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSchema } from '../hooks'
 import { Highlight } from '../lib/highlight'
-import { buildSuggestions, collectFieldsByTag } from '../lib/ngql'
+import { buildSuggestions, collectFieldsByTag, mergeFieldsByTag, schemaFieldsByTag } from '../lib/ngql'
 import { useStore } from '../store'
 import type { Frame as FrameType } from '../types'
 import { CodeArea } from './CodeArea'
@@ -89,24 +89,22 @@ export function Frame({ frame }: { frame: FrameType }) {
   // полей, реально присутствующих в свойствах узлов/рёбер этого результата.
   const space = useStore((s) => s.space)
   const { data: schema } = useSchema(space)
-  const fieldKeys = useMemo(() => {
-    const s = new Set<string>()
-    for (const n of frame.nodes) for (const k of Object.keys(n.props)) s.add(k)
-    for (const e of frame.edges) for (const k of Object.keys(e.props)) s.add(k)
-    return [...s]
-  }, [frame.nodes, frame.edges])
+  const fieldsByTag = useMemo(
+    () =>
+      mergeFieldsByTag([
+        schemaFieldsByTag(schema?.tags ?? [], schema?.edge_types ?? []),
+        collectFieldsByTag(frame.nodes, frame.edges),
+      ]),
+    [schema, frame.nodes, frame.edges],
+  )
   const suggestions = useMemo(
     () =>
       buildSuggestions(
         (schema?.tags ?? []).map((t) => t.name),
         (schema?.edge_types ?? []).map((e) => e.name),
-        fieldKeys,
+        [...new Set(Object.values(fieldsByTag).flat())],
       ),
-    [schema, fieldKeys],
-  )
-  const fieldsByTag = useMemo(
-    () => collectFieldsByTag(frame.nodes, frame.edges),
-    [frame.nodes, frame.edges],
+    [schema, fieldsByTag],
   )
 
   const statusColor =
