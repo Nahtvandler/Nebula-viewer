@@ -177,6 +177,103 @@ def _walk_path(path: Any, nodes: dict[str, GraphNode], edges: dict[str, GraphEdg
         pass
 
 
+# --- сырая таблица результата (вкладка Table / текстовый вид) -----------
+#
+# Сложные ячейки (вершина/ребро/путь) отдаём СТРУКТУРОЙ, а не плоским текстом,
+# чтобы фронт красиво отформатировал их с отступами, кавычками и подсветкой
+# (как текстовый/RAW-вид Neo4j). Примитивы — как есть.
+
+
+def _node_struct(node: Any) -> dict[str, Any]:
+    try:
+        tags = list(node.tags())
+    except Exception:
+        tags = []
+    props: dict[str, Any] = {}
+    for tag in tags:
+        for key, val in _get_props(node, tag).items():
+            props.setdefault(key, val)
+    return {"_t": "node", "labels": tags, "props": props}
+
+
+def _edge_struct(rel: Any) -> dict[str, Any]:
+    try:
+        etype = rel.edge_name()
+    except Exception:
+        etype = ""
+    try:
+        props = {k: unwrap(v) for k, v in (rel.properties() or {}).items()}
+    except Exception:
+        props = {}
+    return {"_t": "edge", "etype": etype, "props": props}
+
+
+def _path_struct(path: Any) -> dict[str, Any]:
+    try:
+        raw_nodes = list(path.nodes())
+        raw_rels = list(path.relationships())
+    except Exception:
+        return {"_t": "path", "nodes": [], "rels": []}
+    nodes = [_node_struct(n) for n in raw_nodes]
+    rels: list[dict[str, Any]] = []
+    for i, rel in enumerate(raw_rels):
+        if i + 1 >= len(raw_nodes):
+            break
+        struct = _edge_struct(rel)
+        try:
+            forward = vid_to_str(rel.start_vertex_id()) == vid_to_str(raw_nodes[i].get_id())
+        except Exception:
+            forward = True
+        struct["forward"] = forward
+        rels.append(struct)
+    return {"_t": "path", "nodes": nodes, "rels": rels}
+
+
+def render_cell(value: Any) -> Any:
+    """Ячейка таблицы: примитив как есть; вершина/ребро/путь -> структура."""
+    if value is None or not hasattr(value, "is_null"):
+        return unwrap(value)
+    try:
+        if value.is_null() or value.is_empty():
+            return None
+        if value.is_vertex():
+            return _node_struct(value.as_node())
+        if value.is_edge():
+            return _edge_struct(value.as_relationship())
+        if value.is_path():
+            return _path_struct(value.as_path())
+    except Exception:
+        return _safe_str(value)
+    # Примитивы, списки, карты, дата/время — обычный unwrap.
+    return unwrap(value)
+
+
+def build_table(result: Any, max_rows: int = 2000) -> dict[str, Any] | None:
+    """Собрать сырую таблицу результата: колонки RETURN + отрендеренные строки."""
+    try:
+        columns = [str(k) for k in result.keys()]
+    except Exception:
+        return None
+    if not columns:
+        return None
+    rows: list[list[Any]] = []
+    truncated = False
+    try:
+        total = result.row_size()
+    except Exception:
+        total = 0
+    for i in range(total):
+        if i >= max_rows:
+            truncated = True
+            break
+        try:
+            vals = result.row_values(i)
+        except Exception:
+            continue
+        rows.append([render_cell(v) for v in vals])
+    return {"columns": columns, "rows": rows, "truncated": truncated}
+
+
 def parse_result_set(result: Any, max_elements: int | None = None) -> tuple[list[GraphNode], list[GraphEdge], bool]:
     """Обойти все колонки всех строк ResultSet, собрать уникальные узлы/рёбра.
 

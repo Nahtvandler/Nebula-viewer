@@ -1,5 +1,6 @@
-import { useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Highlight } from '../lib/highlight'
+import { parseVarTags } from '../lib/ngql'
 
 interface Props {
   value: string
@@ -12,6 +13,8 @@ interface Props {
   paddingLeft?: number
   /** Список подсказок (ключевые слова nGQL, теги, рёбра, поля). */
   suggestions?: string[]
+  /** Поля по тегам/типам — для контекстных подсказок вида c.Component.<field>. */
+  fieldsByTag?: Record<string, string[]>
 }
 
 const mono = "'IBM Plex Mono', monospace"
@@ -44,13 +47,26 @@ export function CodeArea({
   background = 'var(--panel-2)',
   paddingLeft = 14,
   suggestions,
+  fieldsByTag,
 }: Props) {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const preRef = useRef<HTMLPreElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const [matches, setMatches] = useState<string[]>([])
+
+  // Авто-рост высоты: измеряем скрытый «зеркальный» слой с тем же текстом
+  // и шрифтом → окно расширяется под содержимое (до предела, потом скролл).
+  const minH = typeof height === 'number' ? height : 88
+  const maxH = 460
+  const [boxH, setBoxH] = useState<number>(minH)
+  useLayoutEffect(() => {
+    const el = mirrorRef.current
+    if (!el) return
+    setBoxH(Math.max(minH, Math.min(el.offsetHeight, maxH)))
+  }, [value, minH])
 
   // Держим подсветку и колонку номеров в том же скролле, что и textarea,
   // иначе видимый (цветной) текст расходится с кареткой/выделением.
@@ -64,26 +80,52 @@ export function CodeArea({
     if (gutterRef.current) gutterRef.current.scrollTop = ta.scrollTop
   }
 
+  const show = (found: string[]) => {
+    setMatches(found)
+    setActive(0)
+    setOpen(found.length > 0)
+  }
+  const filterBy = (list: string[], partial: string) => {
+    const p = partial.toLowerCase()
+    return list
+      .filter((s) => s.toLowerCase().startsWith(p) && s.toLowerCase() !== p)
+      .slice(0, MAX_SUGGESTIONS)
+  }
+
   const refreshSuggestions = (val: string, caret: number) => {
-    if (!suggestions || suggestions.length === 0) return
     // Внутри строкового литерала не подсказываем — там произвольные значения.
     if (insideString(val, caret)) {
       setOpen(false)
       return
     }
+    const before = val.slice(0, caret)
+    const bindings = parseVarTags(val)
+
+    // 1) `var.Tag.partial` → поля этого тега (по данным результата).
+    const m3 = before.match(/([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)?$/)
+    if (m3) {
+      const fields = fieldsByTag?.[m3[2]] ?? []
+      show(filterBy(fields, m3[3] || ''))
+      return
+    }
+    // 2) `var.partial` → целевой тег переменной (из паттерна запроса).
+    const m2 = before.match(/([A-Za-z_]\w*)\.([A-Za-z_]\w*)?$/)
+    if (m2) {
+      const tag = bindings[m2[1]]
+      show(tag ? filterBy([tag], m2[2] || '') : [])
+      return
+    }
+    // 3) Обычный префикс по словарю (порог 2 символа — меньше шума).
+    if (!suggestions || suggestions.length === 0) {
+      setOpen(false)
+      return
+    }
     const { word } = currentToken(val, caret)
-    // Порог 2 символа — меньше визуального шума.
     if (word.length < 2) {
       setOpen(false)
       return
     }
-    const lower = word.toLowerCase()
-    const found = suggestions
-      .filter((s) => s.toLowerCase().startsWith(lower) && s.toLowerCase() !== lower)
-      .slice(0, MAX_SUGGESTIONS)
-    setMatches(found)
-    setActive(0)
-    setOpen(found.length > 0)
+    show(filterBy(suggestions, word))
   }
 
   const accept = (suggestion: string) => {
@@ -122,9 +164,10 @@ export function CodeArea({
         setActive((a) => (a - 1 + matches.length) % matches.length)
         return
       }
-      // Принимаем ТОЛЬКО по Tab (и клику). Enter в многострочном редакторе
-      // всегда должен переносить строку, а не «съедать» подсказку.
-      if (e.key === 'Tab') {
+      // Пока открыт список — Enter (и Tab) применяют выбранную подсказку.
+      // Обычный перенос строки доступен, когда списка нет (Ctrl/⌘+Enter —
+      // выполнение — перехвачен выше).
+      if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
         accept(matches[active])
         return
@@ -134,8 +177,8 @@ export function CodeArea({
         setOpen(false)
         return
       }
-      // Любой Enter/пробел просто закрывает список и работает как обычно.
-      if (e.key === 'Enter' || e.key === ' ') {
+      // Пробел закрывает список и работает как обычно.
+      if (e.key === ' ') {
         setOpen(false)
       }
     }
@@ -157,7 +200,7 @@ export function CodeArea({
   const lines = value.split('\n').length
 
   return (
-    <div style={{ position: 'relative', height }}>
+    <div style={{ position: 'relative', height: boxH, transition: 'height .08s ease' }}>
       <div
         style={{
           position: 'relative',
@@ -168,6 +211,24 @@ export function CodeArea({
           overflow: 'hidden',
         }}
       >
+        {/* скрытый зеркальный слой — определяет нужную высоту окна */}
+        <div
+          ref={mirrorRef}
+          aria-hidden
+          style={{
+            ...layer,
+            inset: 'auto',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 'auto',
+            visibility: 'hidden',
+            pointerEvents: 'none',
+            color: 'transparent',
+          }}
+        >
+          {value + '\n'}
+        </div>
         {lineNumbers && (
           <div
             ref={gutterRef}
@@ -272,7 +333,7 @@ export function CodeArea({
             </button>
           ))}
           <div style={{ padding: '5px 10px 3px', fontSize: 10.5, color: 'var(--fg-3)' }}>
-            Tab — вставить · Esc — скрыть
+            Enter — вставить · Esc — скрыть
           </div>
         </div>
       )}

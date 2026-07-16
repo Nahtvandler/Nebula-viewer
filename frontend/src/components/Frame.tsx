@@ -1,11 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSchema } from '../hooks'
 import { Highlight } from '../lib/highlight'
+import { buildSuggestions, collectFieldsByTag } from '../lib/ngql'
 import { useStore } from '../store'
 import type { Frame as FrameType } from '../types'
 import { CodeArea } from './CodeArea'
 import { ContextMenu, type ExpandDir, type MenuState } from './ContextMenu'
 import { GraphCanvas } from './GraphCanvas'
 import { PropertiesPanel } from './PropertiesPanel'
+import { TableView } from './TableView'
 
 const mono = "'IBM Plex Mono', monospace"
 const BODY_HEIGHT = 480
@@ -58,6 +61,8 @@ const iconBtn = (title: string, onClick: (e: React.MouseEvent) => void, glyph: s
 
 export function Frame({ frame }: { frame: FrameType }) {
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [view, setView] = useState<'graph' | 'table'>('graph')
+  const [maximized, setMaximized] = useState(false)
   const theme = useStore((s) => s.theme)
   const focusTag = useStore((s) => s.focusTag)
   const setFocusTag = useStore((s) => s.setFocusTag)
@@ -80,9 +85,50 @@ export function Frame({ frame }: { frame: FrameType }) {
     setMenu(null)
   }
 
+  // Подсказки для редактора истории: словарь + теги/рёбра из схемы + имена
+  // полей, реально присутствующих в свойствах узлов/рёбер этого результата.
+  const space = useStore((s) => s.space)
+  const { data: schema } = useSchema(space)
+  const fieldKeys = useMemo(() => {
+    const s = new Set<string>()
+    for (const n of frame.nodes) for (const k of Object.keys(n.props)) s.add(k)
+    for (const e of frame.edges) for (const k of Object.keys(e.props)) s.add(k)
+    return [...s]
+  }, [frame.nodes, frame.edges])
+  const suggestions = useMemo(
+    () =>
+      buildSuggestions(
+        (schema?.tags ?? []).map((t) => t.name),
+        (schema?.edge_types ?? []).map((e) => e.name),
+        fieldKeys,
+      ),
+    [schema, fieldKeys],
+  )
+  const fieldsByTag = useMemo(
+    () => collectFieldsByTag(frame.nodes, frame.edges),
+    [frame.nodes, frame.edges],
+  )
+
   const statusColor =
     frame.status === 'error' ? '--danger' : frame.status === 'running' ? '--fg-3' : '--ok'
   const oneLine = frame.query.replace(/\s+/g, ' ').trim()
+
+  // Граф и таблица доступны независимо: скалярный RETURN даёт таблицу без графа.
+  const hasGraph = frame.status === 'graph' && frame.nodes.length > 0
+  const hasTable = (frame.table?.rows.length ?? 0) > 0
+  const showToggle = hasGraph && hasTable
+  // Нет графа, но есть таблица → сразу показываем таблицу.
+  const effView: 'graph' | 'table' = hasGraph ? view : hasTable ? 'table' : 'graph'
+
+  // Esc выходит из полноэкранного режима.
+  useEffect(() => {
+    if (!maximized) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMaximized(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maximized])
 
   const openCtx = (vid: string, pos: { x: number; y: number }) => {
     const node = frame.nodes.find((n) => n.id === vid)
@@ -177,10 +223,49 @@ export function Frame({ frame }: { frame: FrameType }) {
         <span className="mono" style={{ flex: '0 0 auto', fontSize: 11, color: 'var(--fg-3)', whiteSpace: 'nowrap' }}>
           {metaText(frame)}
         </span>
-        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 2 }} onClick={(e) => e.stopPropagation()}>
-          {iconBtn('Редактировать запрос', () => startEdit(frame.id), '✎')}
-          {iconBtn('Выполнить снова', () => rerunFrame(frame.id), '↻', 14)}
-          {iconBtn('Закрыть', () => closeFrame(frame.id), '✕', 14)}
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 8 }} onClick={(e) => e.stopPropagation()}>
+          {showToggle && (
+            <div
+              style={{
+                display: 'flex',
+                border: '1px solid var(--border)',
+                borderRadius: 7,
+                overflow: 'hidden',
+              }}
+            >
+              {(['graph', 'table'] as const).map((v) => {
+                const active = view === v
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    title={v === 'graph' ? 'Граф' : 'Таблица'}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      background: active ? 'var(--panel-2)' : 'transparent',
+                      border: 'none',
+                      color: active ? 'var(--fg)' : 'var(--fg-3)',
+                      cursor: 'pointer',
+                      padding: '5px 9px',
+                      fontSize: 12,
+                      fontWeight: active ? 600 : 500,
+                    }}
+                  >
+                    <span style={{ fontSize: 12 }}>{v === 'graph' ? '◱' : '▦'}</span>
+                    {v === 'graph' ? 'Граф' : 'Таблица'}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {(hasGraph || hasTable) && iconBtn('На весь экран', () => setMaximized(true), '⤢', 14)}
+            {iconBtn('Редактировать запрос', () => startEdit(frame.id), '✎')}
+            {iconBtn('Выполнить снова', () => rerunFrame(frame.id), '↻', 14)}
+            {iconBtn('Закрыть', () => closeFrame(frame.id), '✕', 14)}
+          </div>
         </div>
       </div>
 
@@ -204,6 +289,8 @@ export function Frame({ frame }: { frame: FrameType }) {
             autoFocus
             background="var(--canvas)"
             paddingLeft={12}
+            suggestions={suggestions}
+            fieldsByTag={fieldsByTag}
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <button
@@ -246,16 +333,39 @@ export function Frame({ frame }: { frame: FrameType }) {
       )}
 
       {/* тело */}
-      {!frame.collapsed && <FrameBody frame={frame} theme={theme} focusTag={focusTag} menu={menu}
-        onSelect={(sel) => { select(frame.id, sel); if (sel === null) setMenu(null) }}
-        onExpand={doExpand}
-        onFocusTag={setFocusTag}
-        onContextMenu={openCtx}
-        onCloseMenu={() => setMenu(null)}
-        onHide={(vid) => { hideNode(frame.id, vid); setMenu(null) }}
-        onCollapse={(vid) => { collapseNode(frame.id, vid); setMenu(null) }}
-        onCopyVid={(vid) => { copyVid(vid); setMenu(null) }}
-      />}
+      {!frame.collapsed && (() => {
+        const body = (
+          <FrameBody frame={frame} theme={theme} focusTag={focusTag} menu={menu} view={effView} maximized={maximized}
+            onSelect={(sel) => { select(frame.id, sel); if (sel === null) setMenu(null) }}
+            onExpand={doExpand}
+            onFocusTag={setFocusTag}
+            onContextMenu={openCtx}
+            onCloseMenu={() => setMenu(null)}
+            onHide={(vid) => { hideNode(frame.id, vid); setMenu(null) }}
+            onCollapse={(vid) => { collapseNode(frame.id, vid); setMenu(null) }}
+            onCopyVid={(vid) => { copyVid(vid); setMenu(null) }}
+          />
+        )
+        // Дерево держим стабильным (display:contents в обычном режиме), чтобы
+        // при входе/выходе из полноэкранного графа canvas НЕ перемонтировался
+        // и не терял раскладку/закрепления — меняется только стиль.
+        return (
+          <div style={maximized ? { position: 'fixed', inset: 0, zIndex: 300, background: 'var(--bg)', display: 'flex', flexDirection: 'column' } : { display: 'contents' }}>
+            <div style={{ display: maximized ? 'flex' : 'none', flex: '0 0 auto', alignItems: 'center', gap: 12, padding: '9px 14px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+              <pre style={{ flex: 1, minWidth: 0, margin: 0, fontFamily: mono, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <Highlight code={oneLine} />
+              </pre>
+              <button
+                onClick={() => setMaximized(false)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--fg-2)', cursor: 'pointer', fontSize: 12.5 }}
+              >
+                ⤡ Свернуть <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>Esc</span>
+              </button>
+            </div>
+            <div style={maximized ? { flex: 1, minHeight: 0, position: 'relative' } : { display: 'contents' }}>{body}</div>
+          </div>
+        )
+      })()}
     </section>
   )
 }
@@ -265,6 +375,8 @@ interface BodyProps {
   theme: string
   focusTag: string | null
   menu: MenuState | null
+  view: 'graph' | 'table'
+  maximized: boolean
   onSelect: (sel: import('../types').Selection) => void
   onExpand: (vid: string, dir?: ExpandDir) => void
   onFocusTag: (tag: string) => void
@@ -275,7 +387,8 @@ interface BodyProps {
   onCopyVid: (vid: string) => void
 }
 
-function FrameBody({ frame, theme, focusTag, menu, onSelect, onExpand, onFocusTag, onContextMenu, onCloseMenu, onHide, onCollapse, onCopyVid }: BodyProps) {
+function FrameBody({ frame, theme, focusTag, menu, view, maximized, onSelect, onExpand, onFocusTag, onContextMenu, onCloseMenu, onHide, onCollapse, onCopyVid }: BodyProps) {
+  const bodyHeight = maximized ? '100%' : BODY_HEIGHT
   if (frame.status === 'running') {
     return (
       <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'var(--canvas)' }}>
@@ -310,12 +423,23 @@ function FrameBody({ frame, theme, focusTag, menu, onSelect, onExpand, onFocusTa
   }
 
   const isEmpty = frame.nodes.length === 0
+
+  // Табличный вид — как вкладка Table в Neo4j (в т.ч. для скалярного RETURN,
+  // когда граф пуст, но таблица результата есть).
+  if (view === 'table') {
+    return (
+      <div style={{ position: 'relative', height: bodyHeight, overflow: 'hidden', background: 'var(--canvas)' }}>
+        <TableView frame={frame} onSelect={onSelect} />
+      </div>
+    )
+  }
+
   return (
     <div
       onContextMenu={(e) => e.preventDefault()}
       style={{
         position: 'relative',
-        height: BODY_HEIGHT,
+        height: bodyHeight,
         overflow: 'hidden',
         background: 'var(--canvas)',
         backgroundImage: 'radial-gradient(var(--grid) 1.1px, transparent 1.1px)',
@@ -351,12 +475,7 @@ function FrameBody({ frame, theme, focusTag, menu, onSelect, onExpand, onFocusTa
         />
       )}
 
-      <PropertiesPanel
-        frame={frame}
-        onClose={() => onSelect(null)}
-        onExpand={(vid) => onExpand(vid)}
-        onCollapse={(vid) => onCollapse(vid)}
-      />
+      <PropertiesPanel frame={frame} onClose={() => onSelect(null)} />
     </div>
   )
 }

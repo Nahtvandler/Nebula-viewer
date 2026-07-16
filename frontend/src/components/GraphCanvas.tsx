@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import cytoscape from 'cytoscape'
 import d3Force from 'cytoscape-d3-force'
 import { buildStylesheet, forceLayout, readThemeColors, readVar } from '../lib/cytoStyle'
+import { downloadCsv, downloadText, edgesCsv, graphJson, nodesCsv } from '../lib/exportData'
 import { primaryTag, tagColorVar, tagRadius } from '../lib/tags'
 import type { Frame, Selection } from '../types'
 
@@ -279,6 +280,23 @@ export function GraphCanvas({
     }
     container.addEventListener('wheel', onWheel, { passive: false })
 
+    // Перерисовать и вписать граф при изменении размера контейнера
+    // (полноэкранный режим, ресайз окна) — иначе canvas остаётся старого размера.
+    let lastW = container.clientWidth
+    let lastH = container.clientHeight
+    const ro = new ResizeObserver(() => {
+      const c = cyRef.current
+      if (!c) return
+      const w = container.clientWidth
+      const h = container.clientHeight
+      if (w === lastW && h === lastH) return
+      lastW = w
+      lastH = h
+      c.resize()
+      c.fit(undefined, 48)
+    })
+    ro.observe(container)
+
     cy.on('tap', 'node', (evt) => {
       // Alt+клик — открепить закреплённый узел (Neo4j-стиль пиннинга).
       if (evt.originalEvent && (evt.originalEvent as MouseEvent).altKey) {
@@ -322,6 +340,7 @@ export function GraphCanvas({
 
     return () => {
       container.removeEventListener('wheel', onWheel)
+      ro.disconnect()
       if (layoutRef.current) {
         try {
           layoutRef.current.stop()
@@ -337,16 +356,24 @@ export function GraphCanvas({
   }, [])
 
   // Пересобрать стиль при смене темы.
+  // ВАЖНО: эффекты React выполняются снизу вверх (дочерние раньше родительских),
+  // поэтому этот эффект срабатывает ДО того, как App выставит data-theme на
+  // <html>. Если прочитать CSS-токены сразу, получим цвета старой темы и
+  // «запечём» их в cytoscape. Откладываем чтение на rAF — к этому моменту
+  // data-theme уже проставлен, и цвета/фон подписей берутся из новой темы.
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
-    // Обновляем цвет фона узлов (зависит от токенов темы) + глобальный стиль.
-    cy.batch(() => {
-      cy.nodes().forEach((n) => {
-        n.data('bg', readVar(tagColorVar(n.data('tag') || undefined)))
+    const raf = requestAnimationFrame(() => {
+      if (!cyRef.current) return
+      cy.batch(() => {
+        cy.nodes().forEach((n) => {
+          n.data('bg', readVar(tagColorVar(n.data('tag') || undefined)))
+        })
       })
+      cy.style(buildStylesheet(readThemeColors()))
     })
-    cy.style(buildStylesheet(readThemeColors()))
+    return () => cancelAnimationFrame(raf)
   }, [theme])
 
   // Синхронизировать элементы при изменении данных фрейма.
@@ -500,14 +527,6 @@ export function GraphCanvas({
     runLayout(true)
   }
 
-  const downloadBlob = (name: string, blob: Blob) => {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = name
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
   const exportPng = () => {
     const cy = cyRef.current
     if (!cy) return
@@ -519,14 +538,15 @@ export function GraphCanvas({
     setExportOpen(false)
   }
   const exportJson = () => {
-    const hidden = new Set(frame.hidden)
-    const nodes = frame.nodes.filter((n) => !hidden.has(n.id))
-    const ids = new Set(nodes.map((n) => n.id))
-    const edges = frame.edges.filter((e) => ids.has(e.source) && ids.has(e.target))
-    const blob = new Blob([JSON.stringify({ query: frame.query, nodes, edges }, null, 2)], {
-      type: 'application/json',
-    })
-    downloadBlob(`nebula-graph-${frame.id}.json`, blob)
+    downloadText(`nebula-graph-${frame.id}.json`, graphJson(frame), 'application/json')
+    setExportOpen(false)
+  }
+  const exportNodesCsv = () => {
+    downloadCsv(`nebula-nodes-${frame.id}.csv`, nodesCsv(frame))
+    setExportOpen(false)
+  }
+  const exportEdgesCsv = () => {
+    downloadCsv(`nebula-edges-${frame.id}.csv`, edgesCsv(frame))
     setExportOpen(false)
   }
 
@@ -766,6 +786,8 @@ export function GraphCanvas({
                 {[
                   { icon: '🖼', label: 'PNG (изображение)', fn: exportPng },
                   { icon: '{ }', label: 'JSON (данные)', fn: exportJson },
+                  { icon: '▦', label: 'CSV — узлы', fn: exportNodesCsv },
+                  { icon: '↦', label: 'CSV — рёбра', fn: exportEdgesCsv },
                 ].map((it) => (
                   <button
                     key={it.label}

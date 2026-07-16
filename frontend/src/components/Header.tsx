@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useHealth, useSchema } from '../hooks'
-import { buildSuggestions } from '../lib/ngql'
+import { buildSuggestions, collectFieldsByTag, mergeFieldsByTag } from '../lib/ngql'
 import { useStore } from '../store'
 import { CodeArea } from './CodeArea'
 import { SpaceSelector } from './SpaceSelector'
@@ -13,16 +13,24 @@ export function Header() {
   const theme = useStore((s) => s.theme)
   const toggleTheme = useStore((s) => s.toggleTheme)
   const space = useStore((s) => s.space)
+  const frames = useStore((s) => s.frames)
   const { data: health } = useHealth()
   const { data: schema } = useSchema(space)
 
+  // Поля собираем из свойств узлов/рёбер всех результатов истории — так подсказки
+  // по именам полей доступны и в главном окне (в т.ч. контекстные c.Component.<field>).
+  const fieldsByTag = useMemo(
+    () => mergeFieldsByTag(frames.map((f) => collectFieldsByTag(f.nodes, f.edges))),
+    [frames],
+  )
   const suggestions = useMemo(
     () =>
       buildSuggestions(
         (schema?.tags ?? []).map((t) => t.name),
         (schema?.edge_types ?? []).map((e) => e.name),
+        [...new Set(Object.values(fieldsByTag).flat())],
       ),
-    [schema],
+    [schema, fieldsByTag],
   )
 
   const connected = health?.connected ?? false
@@ -103,6 +111,7 @@ export function Header() {
             height={78}
             lineNumbers
             suggestions={suggestions}
+            fieldsByTag={fieldsByTag}
           />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, justifyContent: 'center', flex: '0 0 auto' }}>

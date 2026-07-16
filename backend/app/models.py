@@ -28,9 +28,23 @@ class GraphStats(BaseModel):
     truncated: bool = False
 
 
+class TableData(BaseModel):
+    """Сырая результирующая таблица запроса (как вкладка Table в Neo4j).
+
+    columns — имена колонок RETURN; rows — строки, где ячейка это примитив
+    (строка/число/bool/null) либо текстовый рендер вершины/ребра/пути
+    (Neo4j-стиль `(:Tag {..})-[:TYPE {..}]->(:Tag {..})`).
+    """
+
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[Any]] = Field(default_factory=list)
+    truncated: bool = False
+
+
 class GraphResult(BaseModel):
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
+    table: TableData | None = None
     stats: GraphStats
 
 

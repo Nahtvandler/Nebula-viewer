@@ -27,6 +27,7 @@ interface State {
   focusTag: string | null
   query: string
   space: string
+  panelWidth: number
   frames: Frame[]
 
   setQuery: (q: string) => void
@@ -34,6 +35,7 @@ interface State {
   toggleTheme: () => void
   toggleLeft: () => void
   setFocusTag: (t: string) => void
+  setPanelWidth: (w: number) => void
 
   runQuery: (query?: string) => void
   rerunFrame: (id: number) => void
@@ -75,6 +77,7 @@ export const useStore = create<State>()(
         status: 'graph',
         nodes: res.nodes,
         edges: res.edges,
+        table: res.table ?? null,
         hidden: [],
         stats: res.stats,
         layoutSeq: f.layoutSeq + 1,
@@ -90,6 +93,7 @@ export const useStore = create<State>()(
     focusTag: null,
     query: DEFAULT_QUERY,
     space: '',
+    panelWidth: 340,
     frames: [],
 
     setQuery: (q) => set({ query: q }),
@@ -97,6 +101,7 @@ export const useStore = create<State>()(
     toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
     toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),
     setFocusTag: (t) => set((s) => ({ focusTag: s.focusTag === t ? null : t })),
+    setPanelWidth: (w) => set({ panelWidth: Math.max(300, Math.min(760, Math.round(w))) }),
 
     runQuery: (query) => {
       const q = (query ?? get().query).trim()
@@ -211,6 +216,7 @@ export const useStore = create<State>()(
       leftCollapsed: s.leftCollapsed,
       space: s.space,
       query: s.query,
+      panelWidth: s.panelWidth,
     }),
   },
   ),

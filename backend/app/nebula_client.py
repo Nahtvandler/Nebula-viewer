@@ -56,7 +56,18 @@ class NebulaClient:
 
     # --- session pool ----------------------------------------------------
 
+    def _ensure_pool(self) -> None:
+        """Лениво поднять пул, если он ещё не инициализирован. Позволяет бэкенду
+        самому переподключиться, если Nebula поднялась позже старта (гонка при
+        рестарте контейнеров) — без ручного перезапуска бэкенда."""
+        if self._pool is not None:
+            return
+        with self._lock:
+            if self._pool is None:
+                self.connect()
+
     def _new_session(self):
+        self._ensure_pool()
         if self._pool is None:
             raise NebulaError("Пул соединений не инициализирован")
         session = self._pool.get_session(settings.nebula_user, settings.nebula_password)

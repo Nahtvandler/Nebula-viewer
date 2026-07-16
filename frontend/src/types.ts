@@ -21,9 +21,16 @@ export interface GraphStats {
   truncated?: boolean
 }
 
+export interface TableData {
+  columns: string[]
+  rows: unknown[][]
+  truncated?: boolean
+}
+
 export interface GraphResult {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  table?: TableData | null
   stats: GraphStats
 }
 
@@ -78,6 +85,7 @@ export interface Frame {
   draft: string
   nodes: GraphNode[]
   edges: GraphEdge[]
+  table?: TableData | null
   hidden: string[]
   selection: Selection
   stats?: GraphStats

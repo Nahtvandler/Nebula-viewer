@@ -1,15 +1,43 @@
-import type { CSSProperties } from 'react'
+import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import { copyText } from '../lib/exportData'
 import { primaryTag, tagColorVar } from '../lib/tags'
+import { useStore } from '../store'
 import type { Frame } from '../types'
 
 interface Props {
   frame: Frame
   onClose: () => void
-  onExpand: (vid: string) => void
-  onCollapse: (vid: string) => void
 }
 
 const mono = "'IBM Plex Mono', monospace"
+
+/** Маленькая кнопка копирования с галочкой. */
+function CopyMini({ text, title }: { text: string; title: string }) {
+  const [ok, setOk] = useState(false)
+  return (
+    <button
+      onClick={async () => {
+        if (await copyText(text)) {
+          setOk(true)
+          setTimeout(() => setOk(false), 1200)
+        }
+      }}
+      title={title}
+      style={{
+        flex: '0 0 auto',
+        background: 'transparent',
+        border: 'none',
+        color: ok ? 'var(--ok)' : 'var(--fg-3)',
+        cursor: 'pointer',
+        fontSize: 13,
+        lineHeight: 1,
+        padding: '2px 4px',
+      }}
+    >
+      {ok ? '✓' : '⧉'}
+    </button>
+  )
+}
 
 function fmt(v: unknown): string {
   if (v === null || v === undefined) return '∅'
@@ -55,7 +83,6 @@ const panelStyle: CSSProperties = {
   top: 0,
   right: 0,
   bottom: 0,
-  width: 314,
   background: 'var(--panel)',
   borderLeft: '1px solid var(--border)',
   display: 'flex',
@@ -65,7 +92,27 @@ const panelStyle: CSSProperties = {
   boxShadow: '-8px 0 24px rgba(0,0,0,.14)',
 }
 
-export function PropertiesPanel({ frame, onClose, onExpand, onCollapse }: Props) {
+export function PropertiesPanel({ frame, onClose }: Props) {
+  const panelWidth = useStore((s) => s.panelWidth)
+  const setPanelWidth = useStore((s) => s.setPanelWidth)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Тянем левую грань — меняем ширину панели (сохраняется в сторе/localStorage).
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    const parent = panelRef.current?.offsetParent as HTMLElement | null
+    const right = parent ? parent.getBoundingClientRect().right : window.innerWidth
+    const onMove = (ev: globalThis.MouseEvent) => setPanelWidth(right - ev.clientX)
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const sel = frame.selection
   if (!sel) return null
 
@@ -73,7 +120,6 @@ export function PropertiesPanel({ frame, onClose, onExpand, onCollapse }: Props)
   let chips: React.ReactNode = null
   let head: React.ReactNode = null
   let entries: [string, unknown][] = []
-  let footer: React.ReactNode = null
 
   if (sel.kind === 'node') {
     const n = frame.nodes.find((x) => x.id === sel.id)
@@ -123,77 +169,11 @@ export function PropertiesPanel({ frame, onClose, onExpand, onCollapse }: Props)
           >
             {n.id}
           </span>
+          <CopyMini text={n.id} title="Скопировать VID" />
         </div>
       </div>
     )
     entries = Object.entries(n.props)
-    const isExpanding = (frame.expanding ?? []).includes(n.id)
-    footer = (
-      <div
-        style={{
-          flex: '0 0 auto',
-          padding: '12px 14px',
-          borderTop: '1px solid var(--border)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-        }}
-      >
-        <button
-          onClick={() => !isExpanding && onExpand(n.id)}
-          disabled={isExpanding}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 9,
-            width: '100%',
-            background: 'var(--accent)',
-            color: 'var(--accent-fg)',
-            border: 'none',
-            borderRadius: 8,
-            padding: 10,
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: isExpanding ? 'default' : 'pointer',
-            opacity: isExpanding ? 0.75 : 1,
-          }}
-        >
-          {isExpanding ? (
-            <>
-              <span
-                style={{
-                  width: 13,
-                  height: 13,
-                  border: '2px solid var(--accent-fg)',
-                  borderTopColor: 'transparent',
-                  borderRadius: '50%',
-                  animation: 'ng-spin .7s linear infinite',
-                }}
-              />
-              Раскрываю…
-            </>
-          ) : (
-            <>⊕ Раскрыть соседей</>
-          )}
-        </button>
-        <button
-          onClick={() => onCollapse(n.id)}
-          style={{
-            width: '100%',
-            background: 'transparent',
-            color: 'var(--fg-2)',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            padding: 9,
-            fontSize: 12.5,
-            cursor: 'pointer',
-          }}
-        >
-          ⊖ Схлопнуть связи
-        </button>
-      </div>
-    )
   } else {
     const e = frame.edges.find((x) => x.id === sel.id)
     if (!e) return null
@@ -258,7 +238,21 @@ export function PropertiesPanel({ frame, onClose, onExpand, onCollapse }: Props)
   }
 
   return (
-    <div style={panelStyle}>
+    <div ref={panelRef} style={{ ...panelStyle, width: panelWidth }}>
+      {/* ручка изменения ширины на левой грани */}
+      <div
+        onMouseDown={startResize}
+        title="Потянуть — изменить ширину"
+        style={{
+          position: 'absolute',
+          left: -3,
+          top: 0,
+          bottom: 0,
+          width: 7,
+          cursor: 'col-resize',
+          zIndex: 22,
+        }}
+      />
       <div
         style={{
           flex: '0 0 auto',
@@ -302,7 +296,6 @@ export function PropertiesPanel({ frame, onClose, onExpand, onCollapse }: Props)
         <PropRows entries={entries} />
         <div style={{ height: 16 }} />
       </div>
-      {footer}
     </div>
   )
 }

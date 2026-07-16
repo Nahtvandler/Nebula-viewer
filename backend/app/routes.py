@@ -15,10 +15,11 @@ from .models import (
     QueryRequest,
     SchemaInfo,
     SpacesInfo,
+    TableData,
     TagInfo,
 )
 from .nebula_client import NebulaError, client
-from .parser import parse_result_set, unwrap
+from .parser import build_table, parse_result_set, unwrap
 
 router = APIRouter(prefix="/api")
 
@@ -34,10 +35,12 @@ def _run_graph_query(ngql: str, space: str) -> GraphResult:
     started = time.perf_counter()
     result = client.execute(ngql, space=space)
     nodes, edges, truncated = parse_result_set(result, settings.max_elements)
+    raw = build_table(result)
     latency = (time.perf_counter() - started) * 1000
     return GraphResult(
         nodes=nodes,
         edges=edges,
+        table=TableData(**raw) if raw else None,
         stats=GraphStats(
             nodes=len(nodes),
             edges=len(edges),
