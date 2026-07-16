@@ -43,4 +43,5 @@ export const api = {
     get<SchemaInfo>(space ? `/schema?space=${encodeURIComponent(space)}` : '/schema'),
   spaces: () => get<SpacesInfo>('/spaces'),
   health: () => get<HealthInfo>('/health'),
+  reconnect: () => post<HealthInfo>('/reconnect', {}),
 }

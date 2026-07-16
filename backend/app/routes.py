@@ -188,3 +188,20 @@ def health() -> HealthInfo:
             address=address,
             error=str(exc),
         )
+
+
+@router.post("/reconnect", response_model=HealthInfo)
+def reconnect() -> HealthInfo:
+    """Принудительно пересоздать пул соединений к Nebula (кнопка в UI)."""
+    address = f"{settings.nebula_host}:{settings.nebula_port}"
+    try:
+        client.reconnect()
+        client.execute("YIELD 1 AS ok")
+        return HealthInfo(connected=True, space=settings.nebula_space, address=address)
+    except Exception as exc:  # noqa: BLE001
+        return HealthInfo(
+            connected=False,
+            space=settings.nebula_space,
+            address=address,
+            error=str(exc),
+        )

@@ -1,4 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { api } from '../api/client'
 import { useHealth, useSchema } from '../hooks'
 import { buildSuggestions, collectFieldsByTag, mergeFieldsByTag, schemaFieldsByTag } from '../lib/ngql'
 import { useStore } from '../store'
@@ -16,6 +18,21 @@ export function Header() {
   const frames = useStore((s) => s.frames)
   const { data: health } = useHealth()
   const { data: schema } = useSchema(space)
+  const qc = useQueryClient()
+  const [reconnecting, setReconnecting] = useState(false)
+
+  const doReconnect = async () => {
+    setReconnecting(true)
+    try {
+      await api.reconnect()
+    } catch {
+      /* игнорируем — статус подтянет health */
+    }
+    await qc.invalidateQueries({ queryKey: ['health'] })
+    await qc.invalidateQueries({ queryKey: ['spaces'] })
+    await qc.invalidateQueries({ queryKey: ['schema'] })
+    setReconnecting(false)
+  }
 
   // Поля берём СРАЗУ из схемы (DESCRIBE) + дополняем фактическими из результатов
   // истории. Так подсказки по полям (в т.ч. контекстные c.Component.<field>)
@@ -94,6 +111,33 @@ export function Header() {
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: connected ? 'var(--ok)' : 'var(--danger)', boxShadow: `0 0 7px ${connected ? 'var(--ok)' : 'var(--danger)'}` }} />
             <span style={{ fontSize: 12, color: 'var(--fg-2)' }}>{connected ? 'Подключено' : 'Нет связи'}</span>
             <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>nebula://{health?.address ?? '—'}</span>
+            <button
+              onClick={doReconnect}
+              disabled={reconnecting}
+              title="Переподключиться к Nebula"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 22,
+                height: 22,
+                background: 'transparent',
+                border: 'none',
+                borderRadius: 6,
+                color: connected ? 'var(--fg-3)' : 'var(--danger)',
+                cursor: reconnecting ? 'default' : 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  fontSize: 13,
+                  animation: reconnecting ? 'ng-spin .7s linear infinite' : 'none',
+                }}
+              >
+                ↻
+              </span>
+            </button>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

@@ -54,6 +54,14 @@ class NebulaClient:
             self._pool.close()
             self._pool = None
 
+    def reconnect(self) -> None:
+        """Пересоздать пул: сбросить протухшие сессии/соединения и поднять заново.
+        Нужен, когда graphd перезапустился ПОСЛЕ создания пула — тогда пул не
+        None, но его соединения мертвы, и ленивого _ensure_pool недостаточно."""
+        with self._lock:
+            self.close()
+            self.connect()
+
     # --- session pool ----------------------------------------------------
 
     def _ensure_pool(self) -> None:
@@ -104,30 +112,51 @@ class NebulaClient:
 
     # --- queries ---------------------------------------------------------
 
-    def execute(self, ngql: str, space: str | None = None):
-        """Выполнить nGQL, вернуть ResultSet. Бросает NebulaError при ошибке.
-
-        Если задан ``space`` — сессия переключается на него (``USE``) в рамках
-        того же чекаута, что делает запросы независимыми от состояния пула.
-        """
+    def _run(self, ngql: str, space: str | None):
         with self._session() as session:
             if space:
                 used = session.execute(f"USE `{space}`")
                 if not used.is_succeeded():
                     raise NebulaError(used.error_msg(), used.error_code())
-            result = session.execute(ngql)
+            return session.execute(ngql)
+
+    def execute(self, ngql: str, space: str | None = None):
+        """Выполнить nGQL, вернуть ResultSet. Бросает NebulaError при ошибке.
+
+        Если задан ``space`` — сессия переключается на него (``USE``) в рамках
+        того же чекаута. При обрыве соединения/протухшей сессии (напр. graphd
+        перезапустился) — один раз пересоздаём пул и повторяем запрос.
+        """
+        try:
+            result = self._run(ngql, space)
+        except NebulaError:
+            raise  # ошибка уровня запроса (синтаксис, нет пространства) — не реконнектим
+        except Exception:
+            self.reconnect()
+            result = self._run(ngql, space)
         if not result.is_succeeded():
-            raise NebulaError(result.error_msg(), result.error_code())
+            if _is_session_error(result.error_msg()):
+                self.reconnect()
+                result = self._run(ngql, space)
+            if not result.is_succeeded():
+                raise NebulaError(result.error_msg(), result.error_code())
         return result
 
     def execute_raw(self, ngql: str, space: str | None = None):
         """Выполнить nGQL и вернуть ResultSet как есть (без проверки успеха)."""
-        with self._session() as session:
-            if space:
-                used = session.execute(f"USE `{space}`")
-                if not used.is_succeeded():
-                    return used
-            return session.execute(ngql)
+        try:
+            with self._session() as session:
+                if space:
+                    used = session.execute(f"USE `{space}`")
+                    if not used.is_succeeded():
+                        return used
+                return session.execute(ngql)
+        except Exception:
+            self.reconnect()
+            with self._session() as session:
+                if space:
+                    session.execute(f"USE `{space}`")
+                return session.execute(ngql)
 
     def list_spaces(self) -> list[str]:
         """Список пространств (SHOW SPACES)."""
@@ -190,6 +219,13 @@ class NebulaClient:
             .replace("\r", "\\r")
         )
         return f'"{escaped}"'
+
+
+def _is_session_error(msg: str | None) -> bool:
+    """Похоже ли на протухшую/невалидную сессию или обрыв соединения —
+    тогда имеет смысл пересоздать пул и повторить (а не отдавать ошибку)."""
+    m = (msg or "").lower()
+    return any(k in m for k in ("session", "expired", "broken", "connection", "closed"))
 
 
 client = NebulaClient()
