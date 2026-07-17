@@ -57,6 +57,17 @@ export function Header() {
 
   const connected = health?.connected ?? false
 
+  // Выполнить запрос из верхнего поля: очистить поле и проскроллить ленту
+  // результатов наверх (новый фрейм добавляется первым), если она была прокручена.
+  const handleRun = () => {
+    if (!query.trim()) return
+    runQuery(query)
+    setQuery('')
+    requestAnimationFrame(() =>
+      document.getElementById('frame-stream')?.scrollTo({ top: 0, behavior: 'smooth' }),
+    )
+  }
+
   const ghostBtn = (onClick: () => void, title: string, children: React.ReactNode) => (
     <button
       onClick={onClick}
@@ -156,7 +167,7 @@ export function Header() {
           <CodeArea
             value={query}
             onChange={setQuery}
-            onSubmit={() => runQuery()}
+            onSubmit={handleRun}
             height={78}
             lineNumbers
             suggestions={suggestions}
@@ -165,7 +176,7 @@ export function Header() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 7, justifyContent: 'center', flex: '0 0 auto' }}>
           <button
-            onClick={() => runQuery()}
+            onClick={handleRun}
             onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.08)')}
             onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}
             style={{

@@ -260,16 +260,16 @@ export function GraphCanvas({
       style: buildStylesheet(readThemeColors()),
       minZoom: 0.2,
       maxZoom: 3,
-      // Колесо НЕ зумит по умолчанию — иначе оно блокирует прокрутку ленты
-      // фреймов. Зум — по Ctrl/⌘+колесо (см. обработчик ниже) и кнопками +/−.
+      // Собственный зум cytoscape отключён — колесо обрабатываем сами (зум к
+      // курсору), а заодно блокируем прокрутку ленты, пока курсор над графом.
       userZoomingEnabled: false,
     })
     cyRef.current = cy
 
-    // Ctrl/⌘ + колесо → зум к курсору; обычное колесо отдаём странице (скролл).
+    // Колесо над графом → зум к курсору; страница (лента фреймов) при этом не
+    // скроллится — событие гасим, пока курсор внутри канваса.
     const container = containerRef.current
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
       const rect = container.getBoundingClientRect()
       const factor = Math.pow(1.0015, -e.deltaY)
@@ -843,7 +843,7 @@ export function GraphCanvas({
         </div>
         <div
           className="mono"
-          title="Ctrl / ⌘ + колесо — зум · колесо — прокрутка ленты"
+          title="Колесо — зум к курсору · перетаскивание фона — панорама"
           style={{ textAlign: 'center', fontSize: 10.5, color: 'var(--fg-3)', cursor: 'help' }}
         >
           {zoomPct}%

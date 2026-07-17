@@ -8,6 +8,7 @@ export function FrameStream() {
 
   return (
     <div
+      id="frame-stream"
       style={{
         flex: 1,
         minWidth: 0,
